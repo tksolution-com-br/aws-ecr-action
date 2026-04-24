@@ -1,0 +1,47 @@
+name: Build and Push to ECR - Multi Environment
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - homolog
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Determine environment and base image
+        id: env-config
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=prd" >> $GITHUB_OUTPUT
+            echo "ecr_tag=production-${{ github.sha }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/homolog" ]]; then
+            echo "environment=hml" >> $GITHUB_OUTPUT
+            echo "ecr_tag=homolog-${{ github.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "ecr_tag=dev-${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push to ECR
+        uses: tksolution-com-br/aws-ecr-action@master
+        with:
+          access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+          repo: my-application
+          region: ${{ secrets.AWS_REGION }}
+          tags: latest,${{ steps.env-config.outputs.ecr_tag }}
+          environment: ${{ steps.env-config.outputs.environment }}
+          create_repo: true
+          image_scanning_configuration: true
+
+      - name: Deployment notification
+        run: |
+          echo "✅ Image pushed successfully to ${{ steps.env-config.outputs.environment }} environment"
+          echo "🏷️  Tags: latest,${{ steps.env-config.outputs.ecr_tag }}"

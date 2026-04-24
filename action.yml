@@ -17,11 +17,11 @@ inputs:
   registry_ids:
     description: A comma-delimited list of AWS account IDs that are associated with the ECR registries. If you do not specify a registry, the default ECR registry is assumed
     required: false
-    default: ''
+    default: ""
   assume_role:
     description: A role to assume under the account_id account.
     required: false
-    default: ''
+    default: ""
   repo:
     description: Name of your ECR repository
     required: true
@@ -48,19 +48,100 @@ inputs:
     default: Dockerfile
   extra_build_args:
     description: Extra flags to pass to docker build (see docs.docker.com/engine/reference/commandline/build)
-    default: ''
+    default: ""
   cache_from:
     description: Images to use as cache for the docker build (see `--cache-from` argument docs.docker.com/engine/reference/commandline/build)
-    default: ''
+    default: ""
   path:
     description: Path to Dockerfile, defaults to the working directory
     default: .
   prebuild_script:
     description: Relative path from top-level to script to run before Docker build
     required: false
+  environment:
+    description: Environment to deploy (prd, hml, dev). Determines which base Docker image to use from ECR
+    required: false
+    default: ""
+  base_image:
+    description: (Advanced) Override base Docker image. If not set, uses environment-based image or default docker:23.0.6
+    required: false
+    default: ""
 outputs:
   image:
-    description: 'The created image name'
+    description: "The created image name"
 runs:
-  using: docker
-  image: Dockerfile
+  using: composite
+  steps:
+    - name: Determine Base Docker Image
+      id: base-image
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.base_image }}" ]; then
+          # Se base_image foi fornecido explicitamente, usa ele
+          echo "image=${{ inputs.base_image }}" >> $GITHUB_OUTPUT
+          echo "Using custom base image: ${{ inputs.base_image }}"
+        elif [ -n "${{ inputs.environment }}" ]; then
+          # Se environment foi fornecido, usa imagem do ECR baseada no ambiente
+          ACCOUNT_ID="${{ inputs.account_id }}"
+          REGION="${{ inputs.region }}"
+          ENV="${{ inputs.environment }}"
+          
+          case "$ENV" in
+            prd|prod|production)
+              BASE_IMAGE="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/docker-base:prd"
+              ;;
+            hml|homolog|homologation|staging)
+              BASE_IMAGE="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/docker-base:hml"
+              ;;
+            dev|develop|development)
+              BASE_IMAGE="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/docker-base:hml"
+              ;;
+            *)
+              echo "⚠️  Unknown environment: $ENV. Using default docker:23.0.6"
+              BASE_IMAGE="docker:23.0.6"
+              ;;
+          esac
+          
+          echo "image=${BASE_IMAGE}" >> $GITHUB_OUTPUT
+          echo "Using environment-based image for '$ENV': ${BASE_IMAGE}"
+        else
+          # Default: usa imagem pública do Docker Hub
+          echo "image=docker:23.0.6" >> $GITHUB_OUTPUT
+          echo "Using default base image: docker:23.0.6"
+        fi
+
+    - name: Build Action Docker Image
+      shell: bash
+      run: |
+        cd $GITHUB_ACTION_PATH
+        docker build \
+          --build-arg BASE_DOCKER_IMAGE="${{ steps.base-image.outputs.image }}" \
+          -t aws-ecr-action:${{ github.run_id }} \
+          .
+
+    - name: Run Action
+      shell: bash
+      run: |
+        docker run --rm \
+          -v "/var/run/docker.sock:/var/run/docker.sock" \
+          -v "${{ github.workspace }}:${{ github.workspace }}" \
+          -w "${{ github.workspace }}" \
+          -e INPUT_ACCESS_KEY_ID="${{ inputs.access_key_id }}" \
+          -e INPUT_SECRET_ACCESS_KEY="${{ inputs.secret_access_key }}" \
+          -e INPUT_ACCOUNT_ID="${{ inputs.account_id }}" \
+          -e INPUT_REGISTRY_IDS="${{ inputs.registry_ids }}" \
+          -e INPUT_ASSUME_ROLE="${{ inputs.assume_role }}" \
+          -e INPUT_REPO="${{ inputs.repo }}" \
+          -e INPUT_REGION="${{ inputs.region }}" \
+          -e INPUT_CREATE_REPO="${{ inputs.create_repo }}" \
+          -e INPUT_SET_REPO_POLICY="${{ inputs.set_repo_policy }}" \
+          -e INPUT_REPO_POLICY_FILE="${{ inputs.repo_policy_file }}" \
+          -e INPUT_TAGS="${{ inputs.tags }}" \
+          -e INPUT_IMAGE_SCANNING_CONFIGURATION="${{ inputs.image_scanning_configuration }}" \
+          -e INPUT_DOCKERFILE="${{ inputs.dockerfile }}" \
+          -e INPUT_EXTRA_BUILD_ARGS="${{ inputs.extra_build_args }}" \
+          -e INPUT_CACHE_FROM="${{ inputs.cache_from }}" \
+          -e INPUT_PATH="${{ inputs.path }}" \
+          -e INPUT_PREBUILD_SCRIPT="${{ inputs.prebuild_script }}" \
+          -e GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+          aws-ecr-action:${{ github.run_id }}

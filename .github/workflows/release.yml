@@ -20,6 +20,6 @@ jobs:
 
       - name: build and push latest docker image to GCR
         run: |
-          docker pull ghcr.io/kciter/aws-ecr-action:latest
-          docker build . --tag ghcr.io/kciter/aws-ecr-action:$GITHUB_SHA --cache-from ghcr.io/kciter/aws-ecr-action:latest
-          docker push ghcr.io/kciter/aws-ecr-action:$GITHUB_SHA
+          docker pull ghcr.io/tksolution-com-br/aws-ecr-action:latest
+          docker build . --tag ghcr.io/tksolution-com-br/aws-ecr-action:$GITHUB_SHA --cache-from ghcr.io/tksolution-com-br/aws-ecr-action:latest
+          docker push ghcr.io/tksolution-com-br/aws-ecr-action:$GITHUB_SHA

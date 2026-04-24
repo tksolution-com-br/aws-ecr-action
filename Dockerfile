@@ -1,4 +1,5 @@
-FROM docker:23.0.6
+ARG BASE_DOCKER_IMAGE=docker:23.0.6
+FROM ${BASE_DOCKER_IMAGE}
 
 RUN apk update \
   && apk upgrade \
